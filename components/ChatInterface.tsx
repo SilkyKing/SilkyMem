@@ -1,5 +1,6 @@
+
 import React, { useState, useRef, useEffect, useCallback } from 'react';
-import { ChatMessage, ApiConfig, PersonaProfile, ApiProviderType } from '../types';
+import { ChatMessage, ApiConfig, PersonaProfile, ApiProviderType, PromptInjectionStrategy } from '../types';
 import { vault } from '../services/vaultService';
 import { generateResponse } from '../services/geminiService';
 
@@ -27,7 +28,7 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({
     {
       id: 'init-1',
       role: 'system',
-      content: `Vault Core online. ${activePersona.name} ready for recall.`,
+      content: `Nexus online. ${activePersona.name} ready for recall.`,
       timestamp: Date.now(),
       isEncrypted: false
     }
@@ -36,6 +37,11 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({
   const [currentStep, setCurrentStep] = useState<string>(''); 
   const [selectedApiId, setSelectedApiId] = useState<string>('AUTO');
   const [apiConfigs, setApiConfigs] = useState<ApiConfig[]>([]);
+
+  // Prompt Engineering State
+  const [isAdvancedMode, setIsAdvancedMode] = useState(false);
+  const [temperature, setTemperature] = useState(0.7);
+  const [injectionStrategy, setInjectionStrategy] = useState<PromptInjectionStrategy>('PREPEND');
 
   // Drag & Drop State
   const [dragActive, setDragActive] = useState(false);
@@ -125,63 +131,81 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({
     onInputChange(''); 
     setIsProcessing(true);
 
-    // --- RAG PIPELINE STEP 1: RETRIEVAL ---
-    setCurrentStep('Vector Scan: Retrieving Context...');
-    let contextNodes = [];
+    try {
+        // --- RAG PIPELINE STEP 1: RETRIEVAL ---
+        setCurrentStep('Vector Scan: Retrieving Context...');
+        let contextNodes = [];
 
-    if (pinnedMemoryIds.length > 0) {
-        setCurrentStep(`Locked: ${pinnedMemoryIds.length} pinned nodes active.`);
-        contextNodes = vault.getMemoriesByIds(pinnedMemoryIds);
-    } else {
-        // Query the local VaultKernel
-        contextNodes = await vault.semanticSearch(userMsg.content, 4);
+        if (pinnedMemoryIds.length > 0) {
+            setCurrentStep(`Locked: ${pinnedMemoryIds.length} pinned nodes active.`);
+            contextNodes = vault.getMemoriesByIds(pinnedMemoryIds);
+        } else {
+            // Query the local VaultKernel
+            contextNodes = await vault.semanticSearch(userMsg.content, 4);
+        }
+        
+        onMemoriesActivated(contextNodes.map(n => n.id));
+
+        // --- RAG PIPELINE STEP 2: CONTEXT INJECTION ---
+        setCurrentStep(`Synthesizing ${contextNodes.length} memory vectors...`);
+        // Artificial delay to show the "Thinking" UI state
+        await new Promise(r => setTimeout(r, 800)); 
+
+        let configToUse: ApiConfig | undefined | 'AUTO';
+        if (selectedApiId === 'AUTO') {
+            configToUse = 'AUTO';
+            setCurrentStep('Switchboard: Routing Protocol...');
+            await new Promise(r => setTimeout(r, 400)); 
+        } else {
+            configToUse = apiConfigs.find(c => c.id === selectedApiId);
+        }
+        
+        const contextStrings = contextNodes.map(n => `[MEMORY ID:${n.id.split('-')[1]} | T:${new Date(n.timestamp).toLocaleDateString()}] ${n.content}`);
+        
+        // --- RAG PIPELINE STEP 3: GENERATION ---
+        const { text: responseText, metrics } = await generateResponse(
+            userMsg.content, 
+            contextStrings, 
+            configToUse, 
+            activePersona,
+            { temperature, injectionStrategy } // Pass advanced settings
+        );
+
+        // --- RAG PIPELINE STEP 4: INGESTION (The Feedback Loop) ---
+        setCurrentStep('Indexing Conversation...');
+        
+        // We save the PAIR (Q + A) so the model remembers this interaction in the future
+        const memoryContent = `USER: ${userMsg.content}\nNEXUS: ${responseText}`;
+        await vault.saveMemory(memoryContent, 'SYSTEM_INFERENCE' as any);
+        onNewMemory();
+
+        const modelMsg: ChatMessage = {
+            id: (Date.now() + 1).toString(),
+            role: 'model',
+            content: responseText,
+            timestamp: Date.now(),
+            relatedMemories: contextNodes.map(n => n.id),
+            isEncrypted: true,
+            metrics: metrics
+        };
+
+        setHistory(prev => [...prev, modelMsg]);
+        onModelOutput(modelMsg);
+
+    } catch (error: any) {
+        console.error("Pipeline Error:", error);
+        setHistory(prev => [...prev, {
+            id: Date.now().toString(),
+            role: 'system',
+            content: `SYSTEM ERROR: ${error.message || "Operation Failed"}`,
+            timestamp: Date.now(),
+            isEncrypted: false
+        }]);
+    } finally {
+        setIsProcessing(false);
+        setCurrentStep('');
+        onMemoriesActivated([]); 
     }
-    
-    onMemoriesActivated(contextNodes.map(n => n.id));
-
-    // --- RAG PIPELINE STEP 2: CONTEXT INJECTION ---
-    setCurrentStep(`Synthesizing ${contextNodes.length} memory vectors...`);
-    // Artificial delay to show the "Thinking" UI state
-    await new Promise(r => setTimeout(r, 800)); 
-
-    let configToUse: ApiConfig | undefined | 'AUTO';
-    if (selectedApiId === 'AUTO') {
-        configToUse = 'AUTO';
-        setCurrentStep('Switchboard: Routing Protocol...');
-        await new Promise(r => setTimeout(r, 400)); 
-    } else {
-        configToUse = apiConfigs.find(c => c.id === selectedApiId);
-    }
-    
-    const contextStrings = contextNodes.map(n => `[MEMORY ID:${n.id.split('-')[1]} | T:${new Date(n.timestamp).toLocaleDateString()}] ${n.content}`);
-    
-    // --- RAG PIPELINE STEP 3: GENERATION ---
-    const { text: responseText, metrics } = await generateResponse(userMsg.content, contextStrings, configToUse, activePersona);
-
-    // --- RAG PIPELINE STEP 4: INGESTION (The Feedback Loop) ---
-    setCurrentStep('Indexing Conversation...');
-    
-    // We save the PAIR (Q + A) so the model remembers this interaction in the future
-    const memoryContent = `USER: ${userMsg.content}\nAEGIS: ${responseText}`;
-    await vault.saveMemory(memoryContent, 'SYSTEM_INFERENCE' as any);
-    onNewMemory();
-
-    const modelMsg: ChatMessage = {
-      id: (Date.now() + 1).toString(),
-      role: 'model',
-      content: responseText,
-      timestamp: Date.now(),
-      relatedMemories: contextNodes.map(n => n.id),
-      isEncrypted: true,
-      metrics: metrics
-    };
-
-    setHistory(prev => [...prev, modelMsg]);
-    onModelOutput(modelMsg);
-    
-    setIsProcessing(false);
-    setCurrentStep('');
-    onMemoriesActivated([]); 
   };
 
   const handleKeyPress = (e: React.KeyboardEvent) => {
@@ -195,8 +219,9 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({
       switch(provider) {
           case 'OPENAI': return 'border-emerald-500 text-emerald-500'; 
           case 'ANTHROPIC': return 'border-orange-500 text-orange-500'; 
-          case 'GROQ': return 'border-red-500 text-red-500'; 
-          case 'MISTRAL': return 'border-purple-500 text-purple-500'; 
+          case 'GROQ': return 'border-blue-500 text-blue-500'; 
+          case 'MISTRAL': return 'border-yellow-500 text-yellow-500'; 
+          case 'XAI': return 'border-slate-100 text-slate-100'; 
           default: return 'border-cyan-500 text-cyan-500';
       }
   };
@@ -205,9 +230,10 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({
     switch(provider) {
         case 'OPENAI': return 'OpenAI';
         case 'ANTHROPIC': return 'Claude';
-        case 'GROQ': return 'Llama';
+        case 'GROQ': return 'Meta Llama';
         case 'MISTRAL': return 'Mistral';
-        default: return 'Aegis';
+        case 'XAI': return 'Grok';
+        default: return 'Nexus';
     }
   };
 
@@ -285,7 +311,7 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({
       )}
 
       {/* Header */}
-      <div className="h-16 border-b border-white/5 flex items-center justify-between px-8 bg-white/[0.02] backdrop-blur-sm z-20">
+      <div className="h-16 border-b border-white/5 flex items-center justify-between px-8 bg-white/[0.02] backdrop-blur-sm z-30 relative">
         <div className="flex items-center gap-3">
             <div className="relative">
                 <div className="w-2 h-2 rounded-full bg-emerald-500 shadow-[0_0_8px_#10b981]"></div>
@@ -310,6 +336,19 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({
                 <span className="text-[10px] font-mono font-bold text-slate-400 group-hover:text-cyan-400 uppercase">Map</span>
             </button>
 
+            {/* Advanced Toggle */}
+            <button 
+                onClick={() => setIsAdvancedMode(!isAdvancedMode)}
+                className={`flex items-center gap-2 px-3 py-1.5 rounded-lg border transition-all active:scale-95 group ${isAdvancedMode ? 'bg-cyan-900/20 border-cyan-500/30' : 'bg-white/5 border-white/5 hover:bg-white/10'}`}
+            >
+                <svg className={`w-4 h-4 ${isAdvancedMode ? 'text-cyan-400' : 'text-slate-400'}`} fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 6V4m0 2a2 2 0 100 4m0-4a2 2 0 110 4m-6 8a2 2 0 100-4m0 4a2 2 0 110-4m0 4v2m0-6V4m6 6v10m6-2a2 2 0 100-4m0 4a2 2 0 110-4m0 4v2m0-6V4" />
+                </svg>
+                <span className={`text-[10px] font-mono font-bold uppercase ${isAdvancedMode ? 'text-cyan-400' : 'text-slate-400'}`}>
+                    Control
+                </span>
+            </button>
+
             <div className="h-4 w-[1px] bg-white/10"></div>
 
             <div className="flex items-center gap-2">
@@ -321,9 +360,70 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({
                 >
                     <option value="AUTO">Switchboard (Auto)</option>
                     {apiConfigs.map(api => (
-                        <option key={api.id} value={api.id}>{api.name}</option>
+                        <option key={api.id} value={api.id}>
+                            {api.provider === 'GROQ' ? 'Meta Llama' : api.provider === 'XAI' ? 'Grok' : api.name}
+                        </option>
                     ))}
                 </select>
+            </div>
+        </div>
+
+        {/* Advanced Controls Deck (Sliding Panel) */}
+        <div className={`absolute top-full right-0 left-0 bg-slate-900/90 backdrop-blur-xl border-b border-white/10 shadow-2xl transition-all duration-300 ease-in-out overflow-hidden ${isAdvancedMode ? 'max-h-48 opacity-100' : 'max-h-0 opacity-0'}`}>
+            <div className="container mx-auto max-w-4xl p-6 grid grid-cols-2 gap-8">
+                
+                {/* Temperature Slider */}
+                <div>
+                    <div className="flex justify-between items-center mb-2">
+                        <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest flex items-center gap-2">
+                            <svg className="w-3 h-3 text-cyan-500" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 10V3L4 14h7v7l9-11h-7z" /></svg>
+                            Temperature (Creativity)
+                        </label>
+                        <span className="text-xs font-mono text-cyan-400 bg-cyan-900/20 px-2 py-0.5 rounded border border-cyan-500/20">{temperature.toFixed(1)}</span>
+                    </div>
+                    <input 
+                        type="range" 
+                        min="0" 
+                        max="1" 
+                        step="0.1" 
+                        value={temperature} 
+                        onChange={(e) => setTemperature(parseFloat(e.target.value))}
+                        className="w-full h-1.5 bg-slate-800 rounded-lg appearance-none cursor-pointer accent-cyan-500 hover:accent-cyan-400"
+                    />
+                    <div className="flex justify-between text-[9px] text-slate-600 font-mono mt-1">
+                        <span>PRECISE</span>
+                        <span>BALANCED</span>
+                        <span>CREATIVE</span>
+                    </div>
+                </div>
+
+                {/* Strategy Dropdown */}
+                <div>
+                    <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest flex items-center gap-2 mb-2">
+                        <svg className="w-3 h-3 text-emerald-500" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 7v10c0 2.21 3.582 4 8 4s8-1.79 8-4V7M4 7c0 2.21 3.582 4 8 4s8-1.79 8-4M4 7c0-2.21 3.582-4 8-4s8 1.79 8 4m0 5c0 2.21-3.582 4-8 4s-8-1.79-8-4" /></svg>
+                        Context Injection Strategy
+                    </label>
+                    <div className="relative">
+                        <select 
+                            value={injectionStrategy}
+                            onChange={(e) => setInjectionStrategy(e.target.value as PromptInjectionStrategy)}
+                            className="w-full bg-black/40 border border-white/10 rounded-lg py-2 px-3 text-xs text-slate-200 font-mono focus:border-cyan-500/50 outline-none appearance-none"
+                        >
+                            <option value="PREPEND">PREPEND (Standard)</option>
+                            <option value="APPEND">APPEND (Recency Bias)</option>
+                            <option value="INTERLEAVE">INTERLEAVE (Deep Integrate)</option>
+                        </select>
+                        <div className="absolute right-3 top-2.5 pointer-events-none text-slate-500">
+                             <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" /></svg>
+                        </div>
+                    </div>
+                    <div className="text-[9px] text-slate-500 mt-2 leading-relaxed">
+                        {injectionStrategy === 'PREPEND' && "Injects retrieved context BEFORE the user query. Best for general Q&A."}
+                        {injectionStrategy === 'APPEND' && "Injects context AFTER the query. Forces the model to consider the prompt first."}
+                        {injectionStrategy === 'INTERLEAVE' && "Splits context chunks around the query. High token usage, high coherence."}
+                    </div>
+                </div>
+
             </div>
         </div>
       </div>
@@ -341,7 +441,7 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({
             ) : msg.role === 'system' ? (
                 // SYSTEM MESSAGE
                 <div className="w-full flex justify-center my-2">
-                    <div className="text-[10px] font-mono text-slate-500 bg-black/20 px-3 py-1 rounded-full border border-white/5 flex items-center gap-2">
+                    <div className={`text-[10px] font-mono px-3 py-1 rounded-full border flex items-center gap-2 ${msg.content.includes('ERROR') ? 'bg-red-900/20 border-red-500/20 text-red-400' : 'bg-black/20 border-white/5 text-slate-500'}`}>
                         {msg.isEncrypted && <svg className="w-3 h-3 text-emerald-500" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" /></svg>}
                         {msg.content}
                     </div>

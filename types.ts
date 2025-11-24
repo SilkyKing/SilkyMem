@@ -1,3 +1,4 @@
+
 // The "Digital DNA" Format
 // This schema is designed to be readable in 2075.
 
@@ -43,7 +44,7 @@ export enum ModelProvider {
   LEGACY_GPT = 'GPT-4o (Legacy Bridge)',
 }
 
-export type ApiProviderType = 'GOOGLE' | 'OPENAI' | 'ANTHROPIC' | 'GROQ' | 'MISTRAL' | 'CUSTOM_LOCAL';
+export type ApiProviderType = 'GOOGLE' | 'OPENAI' | 'ANTHROPIC' | 'GROQ' | 'MISTRAL' | 'XAI' | 'CUSTOM_LOCAL';
 
 export interface ApiConfig {
   id: string;
@@ -97,4 +98,30 @@ export interface PersonaProfile {
   tone: string; // e.g., "Formal", "Witty", "Sarcastic"
   systemPrompt: string; // The core directive
   avatarColor: string; // Hex for UI accent
+  isCustom?: boolean; // Distinguishes user-created agents from system defaults
+}
+
+// --- NEW AUTH TYPES ---
+
+export enum AuthStage {
+  CHECKING_STATUS = 'CHECKING_STATUS', // Initial Load
+  VAULT_SETUP = 'VAULT_SETUP',       // Step 2a: Create PIN (First Run)
+  VAULT_UNLOCK = 'VAULT_UNLOCK',     // Step 2b: Enter PIN (Recurring)
+  RECOVERY_FLOW = 'RECOVERY_FLOW',   // Forgot PIN
+  AUTHENTICATED = 'AUTHENTICATED'    // Access Granted
+}
+
+export interface UserIdentity {
+  email: string;
+  subscriptionTier: 'FREE' | 'PRO' | 'LIFETIME';
+  isCloudAuthenticated: boolean;
+}
+
+// --- PROMPT ENGINEERING TYPES ---
+
+export type PromptInjectionStrategy = 'PREPEND' | 'APPEND' | 'INTERLEAVE';
+
+export interface GenerationOptions {
+    temperature: number;
+    injectionStrategy: PromptInjectionStrategy;
 }

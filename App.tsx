@@ -6,6 +6,7 @@ import PersonaConfigurator from './components/PersonaConfigurator';
 import ApiDashboard from './components/ApiDashboard';
 import LoginScreen from './components/LoginScreen';
 import { vault } from './services/vaultService';
+import { licenseManager } from './services/licenseManager';
 import { MemoryNode, StorageMode, PersonaProfile, ChatMessage } from './types';
 import { APP_NAME } from './constants';
 
@@ -27,7 +28,14 @@ const App: React.FC = () => {
   const [pinnedMemoryIds, setPinnedMemoryIds] = useState<string[]>([]);
 
   // Stats for the dashboard
-  const [stats, setStats] = useState({ used: 0, free: 100, localCount: 0, cloudCount: 0, cloudActive: false });
+  const [stats, setStats] = useState({ 
+      usedBytes: 0, 
+      limitBytes: 100, 
+      percentUsed: 0,
+      localCount: 0, 
+      cloudCount: 0, 
+      cloudActive: false 
+  });
 
   const loadData = () => {
     const mems = vault.getAllMemories();
@@ -39,12 +47,13 @@ const App: React.FC = () => {
     setStorageMode(mode);
     setActivePersona(persona);
     
-    // Calculate storage usage based on mocked capacity
-    const used = Math.min(100, Math.round((s.syncedMemories * 5))); 
-    
+    const limit = licenseManager.getStorageLimit();
+    const percent = Math.min(100, (s.bytesUsed / limit) * 100);
+
     setStats({
-        used: used,
-        free: 100 - used,
+        usedBytes: s.bytesUsed,
+        limitBytes: limit,
+        percentUsed: percent,
         localCount: s.totalMemories - s.syncedMemories,
         cloudCount: s.syncedMemories,
         cloudActive: s.isCloudMirrorActive
@@ -53,10 +62,30 @@ const App: React.FC = () => {
 
   useEffect(() => {
     if (isAuthenticated) {
+        // SAFETY GUARD: Check if vault is actually locked (HMR or state desync)
+        if (vault.getIsLocked()) {
+             console.warn("Vault is locked but App is Authenticated. Resetting security context.");
+             setIsAuthenticated(false);
+             return;
+        }
+
         loadData();
         const handleUpdate = () => loadData();
         window.addEventListener('vault-update', handleUpdate);
-        return () => window.removeEventListener('vault-update', handleUpdate);
+        
+        // Navigation Event Listener for Deep Linking (e.g. from DropZone)
+        const handleNavigate = (e: Event) => {
+             const customEvent = e as CustomEvent;
+             if (customEvent.detail?.view) {
+                 setView(customEvent.detail.view);
+             }
+        };
+        window.addEventListener('nexus-navigate', handleNavigate);
+
+        return () => {
+            window.removeEventListener('vault-update', handleUpdate);
+            window.removeEventListener('nexus-navigate', handleNavigate);
+        };
     }
   }, [isAuthenticated]);
 
@@ -75,18 +104,30 @@ const App: React.FC = () => {
       );
   };
 
-  // --- VAULT HEALTH WIDGET (Replaces Chart) ---
+  const formatBytes = (bytes: number) => {
+      if (bytes < 1024) return bytes + ' B';
+      if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + ' KB';
+      if (bytes < 1024 * 1024 * 1024) return (bytes / (1024 * 1024)).toFixed(1) + ' MB';
+      return (bytes / (1024 * 1024 * 1024)).toFixed(1) + ' GB';
+  };
+
+  // --- VAULT HEALTH WIDGET ---
   const VaultHealthWidget = () => {
       const radius = 24;
       const circumference = 2 * Math.PI * radius;
-      const progress = stats.used;
+      const progress = stats.percentUsed;
       const offset = circumference - (progress / 100) * circumference;
       
+      const isOverLimit = progress >= 100;
       const isHighUsage = progress > 80;
-      const ringColor = isHighUsage ? 'text-orange-500' : 'text-cyan-500';
+      const ringColor = isOverLimit ? 'text-red-500' : isHighUsage ? 'text-orange-500' : 'text-cyan-500';
 
       return (
-          <div className="flex flex-col gap-3 group cursor-pointer active:scale-95 transition-transform duration-200">
+          <div 
+            onClick={() => window.open('https://nexusbank.ai/pricing?ref_app=desktop', '_blank')}
+            className="flex flex-col gap-3 group cursor-pointer active:scale-95 transition-transform duration-200"
+            title={licenseManager.getTier() === 'FREE' ? "Upgrade to Nexus Pro" : "Manage Subscription"}
+          >
              <div className="flex items-center gap-4">
                  <div className="relative w-16 h-16 flex items-center justify-center">
                     {/* Background Ring */}
@@ -115,21 +156,23 @@ const App: React.FC = () => {
                     </svg>
                     {/* Center Shield */}
                     <div className="absolute inset-0 flex items-center justify-center">
-                        <svg className={`w-5 h-5 ${stats.cloudActive ? 'text-emerald-500' : 'text-slate-600'} animate-pulse-fast drop-shadow-[0_0_8px_rgba(16,185,129,0.5)]`} fill="currentColor" viewBox="0 0 20 20">
+                        <svg className={`w-5 h-5 ${isOverLimit ? 'text-red-500 animate-pulse' : stats.cloudActive ? 'text-emerald-500' : 'text-slate-600'} drop-shadow-[0_0_8px_rgba(16,185,129,0.5)] group-hover:scale-110 transition-transform`} fill="currentColor" viewBox="0 0 20 20">
                            <path fillRule="evenodd" d="M10 1.944A11.954 11.954 0 012.166 5C2.056 5.649 2 6.319 2 7c0 5.225 3.34 9.67 8 11.317C14.66 16.67 18 12.225 18 7c0-.682-.057-1.35-.166-2.001A11.954 11.954 0 0110 1.944zM11 14a1 1 0 11-2 0 1 1 0 012 0zm0-7a1 1 0 10-2 0v3a1 1 0 102 0V7z" clipRule="evenodd" />
                         </svg>
                     </div>
                  </div>
                  
                  <div className="flex flex-col">
-                     <span className="text-[10px] uppercase text-slate-500 font-bold tracking-wider">Vault Capacity</span>
+                     <span className={`text-[10px] uppercase font-bold tracking-wider transition-colors ${isOverLimit ? 'text-red-500' : 'text-slate-500 group-hover:text-cyan-400'}`}>
+                         {isOverLimit ? 'STORAGE FULL' : 'Vault Capacity'}
+                     </span>
                      <span className="text-sm font-mono text-slate-200">
-                         {(stats.used * 0.05).toFixed(1)}GB <span className="text-slate-600">/ 5.0GB</span>
+                         {formatBytes(stats.usedBytes)} <span className="text-slate-600">/ {formatBytes(stats.limitBytes)}</span>
                      </span>
                      <div className="flex items-center gap-1.5 mt-1">
                          <div className={`w-1.5 h-1.5 rounded-full ${stats.cloudActive ? 'bg-emerald-500 shadow-[0_0_5px_#10b981]' : 'bg-slate-500'}`}></div>
                          <span className={`text-[9px] font-bold ${stats.cloudActive ? 'text-emerald-500' : 'text-slate-500'}`}>
-                             {stats.cloudActive ? 'CLOUD MIRROR ACTIVE' : 'LOCAL ONLY'}
+                             {licenseManager.getTier() === 'FREE' ? 'FREE TIER (LOCAL)' : 'NEXUS PRO'}
                          </span>
                      </div>
                  </div>
@@ -175,8 +218,8 @@ const App: React.FC = () => {
                             : 'text-slate-400 hover:bg-white/5 hover:text-slate-200 border border-transparent'
                         }`}
                     >
-                        <div className={`p-1.5 rounded-lg ${view === item.id ? 'bg-cyan-500/10 text-cyan-400' : 'text-slate-600 group-hover:text-slate-300'}`}>
-                            <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d={item.icon} /></svg>
+                        <div className="p-1.5 rounded-lg text-slate-600 group-hover:text-slate-300 transition-colors">
+                             <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d={item.icon} /></svg>
                         </div>
                         <div className="flex flex-col items-start">
                             <span className="font-semibold tracking-wide">{item.label}</span>

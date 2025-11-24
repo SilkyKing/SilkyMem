@@ -4,7 +4,8 @@ import { OriginSource } from '../types';
 
 const MagicDropZone: React.FC = () => {
   const [dragActive, setDragActive] = useState(false);
-  const [processingState, setProcessingState] = useState<'IDLE' | 'PROCESSING' | 'COMPLETE'>('IDLE');
+  const [processingState, setProcessingState] = useState<'IDLE' | 'PROCESSING' | 'COMPLETE' | 'ERROR'>('IDLE');
+  const [errorMessage, setErrorMessage] = useState('');
   const [fileName, setFileName] = useState('');
   const [showUpsell, setShowUpsell] = useState(false);
 
@@ -23,32 +24,51 @@ const MagicDropZone: React.FC = () => {
   const processFile = async (file: File) => {
     setProcessingState('PROCESSING');
     setFileName(file.name);
+    setErrorMessage('');
     
-    // Simulate File Read & Vectorization Delay
-    await new Promise(resolve => setTimeout(resolve, 1500));
-    
-    // Mock Content Extraction
-    const content = `[IMPORTED FILE: ${file.name}] Content content content... Simulated extraction from ${file.type}.`;
-    
-    // Save to Vault
-    // Rule: Files dropped here are "Reference Material", so isUserAuthored = false
-    await vault.saveMemory(content, OriginSource.IMPORTED_FILE, false);
-    
-    setProcessingState('COMPLETE');
-    window.dispatchEvent(new Event('vault-update'));
-    
-    // Show upsell after a brief moment
-    setTimeout(() => {
-        setShowUpsell(true);
-    }, 500);
-    
-    // Reset after 5 seconds if not interacted with
-    setTimeout(() => {
-        if (!showUpsell) {
-            setProcessingState('IDLE');
-            setFileName('');
+    try {
+        // Simulate File Read & Vectorization Delay
+        await new Promise(resolve => setTimeout(resolve, 1500));
+        
+        // Mock Content Extraction
+        const content = `[IMPORTED FILE: ${file.name}] Content content content... Simulated extraction from ${file.type}.`;
+        
+        // Save to Vault
+        // Rule: Files dropped here are "Reference Material", so isUserAuthored = false
+        await vault.saveMemory(content, OriginSource.IMPORTED_FILE, false);
+        
+        setProcessingState('COMPLETE');
+        window.dispatchEvent(new Event('vault-update'));
+        
+        // Show upsell after a brief moment
+        setTimeout(() => {
+            setShowUpsell(true);
+        }, 500);
+        
+        // Reset after 5 seconds if not interacted with
+        setTimeout(() => {
+            if (!showUpsell) {
+                setProcessingState('IDLE');
+                setFileName('');
+            }
+        }, 5000);
+    } catch (e: any) {
+        console.error("Ingest Error:", e);
+        setProcessingState('ERROR');
+        
+        if (e.message === "VAULT_OVER_CAPACITY") {
+            setErrorMessage("VAULT OVER LIMIT: UPGRADE REQUIRED");
+        } else {
+            setErrorMessage("INGEST FAILED: " + e.message);
         }
-    }, 5000);
+        
+        // Reset after 3s
+        setTimeout(() => {
+            if (processingState === 'ERROR') { // Only reset if user hasn't started another
+                 setProcessingState('IDLE');
+            }
+        }, 3000);
+    }
   };
 
   const handleDrop = useCallback((e: React.DragEvent) => {
@@ -77,6 +97,12 @@ const MagicDropZone: React.FC = () => {
       setProcessingState('IDLE');
   };
 
+  const handleConnectEmail = () => {
+      // Route to Nexus (Integrations) Tab
+      window.dispatchEvent(new CustomEvent('nexus-navigate', { detail: { view: 'APIS' } }));
+      closeUpsell();
+  };
+
   return (
     <div className="relative w-full max-w-lg mx-auto mb-8 font-mono">
       {/* Hidden File Input */}
@@ -93,7 +119,9 @@ const MagicDropZone: React.FC = () => {
             relative overflow-hidden rounded-xl border-2 border-dashed transition-all duration-300 p-8 flex flex-col items-center justify-center text-center cursor-pointer group
             ${dragActive 
                 ? 'border-cyan-400 bg-cyan-900/20 scale-[1.02] shadow-[0_0_20px_rgba(6,182,212,0.3)]' 
-                : 'border-slate-800 bg-slate-900/30 hover:bg-slate-900/50 hover:border-slate-600'}
+                : processingState === 'ERROR'
+                    ? 'border-red-500 bg-red-900/10'
+                    : 'border-slate-800 bg-slate-900/30 hover:bg-slate-900/50 hover:border-slate-600'}
             ${processingState === 'PROCESSING' ? 'border-none ring-2 ring-cyan-500/50' : ''}
         `}
         onDragEnter={handleDrag}
@@ -135,6 +163,15 @@ const MagicDropZone: React.FC = () => {
                 <div className="text-xs font-bold text-emerald-400">INDEXED SECURELY</div>
              </div>
         )}
+
+        {processingState === 'ERROR' && (
+             <div className="flex flex-col items-center z-10 animate-in fade-in zoom-in">
+                <div className="w-10 h-10 rounded-full bg-red-900/30 border border-red-500/50 flex items-center justify-center mb-3">
+                    <svg className="w-5 h-5 text-red-400" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" /></svg>
+                </div>
+                <div className="text-xs font-bold text-red-400">{errorMessage || 'FAILED'}</div>
+             </div>
+        )}
         
         {/* Background Scan Effect */}
         {processingState === 'PROCESSING' && (
@@ -142,20 +179,31 @@ const MagicDropZone: React.FC = () => {
         )}
       </div>
 
-      {/* Upsell Ramp (Appears below after success) */}
+      {/* Upsell Ramp (Modal) */}
       {showUpsell && (
-          <div className="absolute top-0 left-0 right-0 bottom-0 bg-slate-900/95 backdrop-blur rounded-xl border border-cyan-500/30 flex flex-col items-center justify-center p-6 text-center animate-in fade-in slide-in-from-bottom-2 shadow-2xl z-20">
-              <h4 className="text-sm font-bold text-cyan-400 mb-2">Secure Link Established</h4>
-              <p className="text-[10px] text-slate-400 mb-4 max-w-[250px] leading-relaxed">
-                  Your file was successfully indexed into the vault. Want to automate this for your digital life?
-              </p>
-              <div className="flex gap-2">
-                  <button onClick={closeUpsell} className="px-3 py-1.5 text-[10px] text-slate-500 hover:text-slate-300">
-                      Dismiss
-                  </button>
-                  <button className="px-4 py-1.5 bg-cyan-600 hover:bg-cyan-500 text-white text-[10px] font-bold rounded shadow-lg shadow-cyan-500/20 transition-all">
-                      Connect Email Stream
-                  </button>
+          <div 
+            className="absolute top-0 left-0 right-0 bottom-0 bg-slate-900/95 backdrop-blur rounded-xl border border-cyan-500/30 flex flex-col items-center justify-center p-6 text-center animate-in fade-in slide-in-from-bottom-2 shadow-2xl z-20 cursor-default"
+            onClick={(e) => {
+                // Background Click Dismissal
+                if (e.target === e.currentTarget) closeUpsell();
+            }}
+          >
+              <div onClick={(e) => e.stopPropagation()} className="flex flex-col items-center w-full">
+                  <h4 className="text-sm font-bold text-cyan-400 mb-2">Secure Link Established</h4>
+                  <p className="text-[10px] text-slate-400 mb-4 max-w-[250px] leading-relaxed">
+                      Your file was successfully indexed into the vault. Want to automate this for your digital life?
+                  </p>
+                  <div className="flex gap-2">
+                      <button onClick={closeUpsell} className="px-3 py-1.5 text-[10px] text-slate-500 hover:text-slate-300">
+                          Dismiss
+                      </button>
+                      <button 
+                        onClick={handleConnectEmail}
+                        className="px-4 py-1.5 bg-cyan-600 hover:bg-cyan-500 text-white text-[10px] font-bold rounded shadow-lg shadow-cyan-500/20 transition-all active:scale-95"
+                      >
+                          Connect Email Stream
+                      </button>
+                  </div>
               </div>
           </div>
       )}

@@ -1,6 +1,7 @@
+
 import { GoogleGenAI } from "@google/genai";
 import { MODEL_MAPPING } from "../constants";
-import { ModelProvider, PersonaProfile, ApiConfig, ApiProviderType, UsageMetrics } from "../types";
+import { ModelProvider, PersonaProfile, ApiConfig, ApiProviderType, UsageMetrics, GenerationOptions, PromptInjectionStrategy } from "../types";
 import { vault } from "./vaultService";
 
 // --- 1. THE INTERFACE (LLM_Standard_Interface) ---
@@ -10,6 +11,7 @@ interface StandardInput {
   userContext: string;
   userQuery: string;
   temperature: number;
+  strategy: PromptInjectionStrategy;
 }
 
 interface StandardResponse {
@@ -23,7 +25,8 @@ export const generateResponse = async (
   prompt: string,
   context: string[],
   apiConfig: ApiConfig | undefined | 'AUTO',
-  persona: PersonaProfile
+  persona: PersonaProfile,
+  options: GenerationOptions = { temperature: 0.7, injectionStrategy: 'PREPEND' }
 ): Promise<{ text: string; metrics: UsageMetrics }> => {
 
   let selectedConfig: ApiConfig | undefined;
@@ -51,7 +54,8 @@ export const generateResponse = async (
       systemPrompt: `SYSTEM IDENTITY:\nNAME: ${persona.name}\nROLE: ${persona.role}\nTONE: ${persona.tone}\nDIRECTIVE: ${persona.systemPrompt}`,
       userContext: context.join('\n---\n'),
       userQuery: prompt,
-      temperature: 0.7
+      temperature: options.temperature,
+      strategy: options.injectionStrategy
   };
 
   // ROUTE TO ADAPTER
@@ -74,6 +78,9 @@ export const generateResponse = async (
           case 'MISTRAL':
               response = await MistralAdapter(selectedConfig, input, routingMode);
               break;
+          case 'XAI':
+              response = await XAIAdapter(selectedConfig, input, routingMode);
+              break;
           case 'CUSTOM_LOCAL':
               response = await CustomLocalAdapter(selectedConfig, input, routingMode);
               break;
@@ -91,6 +98,28 @@ export const generateResponse = async (
     };
   }
 };
+
+// --- HELPER: CONTEXT STRATEGY BUILDER ---
+function buildPromptWithStrategy(input: StandardInput): string {
+    const { userContext, userQuery, strategy } = input;
+    
+    if (!userContext) return `QUERY:\n${userQuery}`;
+
+    switch (strategy) {
+        case 'APPEND':
+            return `QUERY:\n${userQuery}\n\nRELEVANT CONTEXT (Use if helpful):\n${userContext}`;
+        case 'INTERLEAVE':
+            // Logic: Split context, rank top half before, bottom half after
+            const parts = userContext.split('\n---\n');
+            const mid = Math.ceil(parts.length / 2);
+            const primary = parts.slice(0, mid).join('\n---\n');
+            const secondary = parts.slice(mid).join('\n---\n');
+            return `PRIMARY DATA:\n${primary}\n\nUSER QUERY:\n${userQuery}\n\nSECONDARY DATA:\n${secondary}`;
+        case 'PREPEND':
+        default:
+            return `CONTEXT:\n${userContext}\n\nQUERY:\n${userQuery}`;
+    }
+}
 
 // --- 3. MODEL SELECTOR (The Switchboard) ---
 
@@ -113,6 +142,7 @@ function determineOptimalModel(
 
     // 2. LIGHTNING MODE: Low Complexity / Chatter
     // Criteria: Short query OR summarization task
+    // Prefer Groq (Meta Llama) for speed
     if ((query.length < 50 && !/write|generate|create/i.test(lowerQuery)) || /summarize|summary/i.test(lowerQuery)) {
         const groq = availableConfigs.find(c => c.provider === 'GROQ');
         if (groq) return { config: groq, mode: 'LIGHTNING' };
@@ -131,9 +161,12 @@ function determineOptimalModel(
             if (claude) return { config: claude, mode: 'DEEP_THOUGHT' };
         }
         
-        // Prioritize GPT-4 for logic/structure
+        // Prioritize GPT-4 or Grok for logic/structure
         const gpt = availableConfigs.find(c => c.provider === 'OPENAI');
         if (gpt) return { config: gpt, mode: 'DEEP_THOUGHT' };
+
+        const grok = availableConfigs.find(c => c.provider === 'XAI');
+        if (grok) return { config: grok, mode: 'DEEP_THOUGHT' };
     }
 
     // Default: Standard Mode (Gemini Flash or first available)
@@ -152,11 +185,12 @@ function estimateTokens(text: string): number {
 function calculateCost(inputTokens: number, outputTokens: number, provider: ApiProviderType): number {
     // Rough estimation in cents
     switch(provider) {
-        case 'OPENAI': return (inputTokens * 0.0005 + outputTokens * 0.0015); // GPT-4o approx
-        case 'ANTHROPIC': return (inputTokens * 0.0003 + outputTokens * 0.0015); // Sonnet approx
-        case 'GOOGLE': return (inputTokens * 0.0001 + outputTokens * 0.0004); // Gemini Flash (Cheap)
-        case 'GROQ': return (inputTokens * 0.00005 + outputTokens * 0.00008); // Llama 3 (Very Cheap)
+        case 'OPENAI': return (inputTokens * 0.0005 + outputTokens * 0.0015); 
+        case 'ANTHROPIC': return (inputTokens * 0.0003 + outputTokens * 0.0015);
+        case 'GOOGLE': return (inputTokens * 0.0001 + outputTokens * 0.0004);
+        case 'GROQ': return (inputTokens * 0.00005 + outputTokens * 0.00008); 
         case 'MISTRAL': return (inputTokens * 0.0002 + outputTokens * 0.0006);
+        case 'XAI': return (inputTokens * 0.0004 + outputTokens * 0.0012); // Estimated Grok pricing
         default: return 0;
     }
 }
@@ -169,12 +203,16 @@ async function GoogleAdapter(config: ApiConfig, input: StandardInput, mode: any)
     const aiClient = new GoogleGenAI({ apiKey: config.apiKey });
     const modelId = config.modelId || 'gemini-2.5-flash';
 
-    const fullPrompt = `${input.systemPrompt}\n\nCONTEXT:\n${input.userContext}\n\nQUERY:\n${input.userQuery}`;
+    const fullContent = buildPromptWithStrategy(input);
+    const fullPrompt = `${input.systemPrompt}\n\n${fullContent}`;
     const inputT = estimateTokens(fullPrompt);
 
     const response = await aiClient.models.generateContent({
         model: modelId,
         contents: fullPrompt,
+        config: {
+            temperature: input.temperature,
+        }
     });
     
     const text = response.text || "Empty Response";
@@ -195,7 +233,7 @@ async function GoogleAdapter(config: ApiConfig, input: StandardInput, mode: any)
 }
 
 async function OpenAIAdapter(config: ApiConfig, input: StandardInput, mode: any): Promise<StandardResponse> {
-    const fullContent = `CONTEXT:\n${input.userContext}\n\nQUERY:\n${input.userQuery}`;
+    const fullContent = buildPromptWithStrategy(input);
     
     if (!config.apiKey) return simulateResponse(config, input, mode);
 
@@ -236,8 +274,8 @@ async function OpenAIAdapter(config: ApiConfig, input: StandardInput, mode: any)
 }
 
 async function AnthropicAdapter(config: ApiConfig, input: StandardInput, mode: any): Promise<StandardResponse> {
-    const xmlContext = `<context>${input.userContext}</context>`;
-    
+    const fullContent = buildPromptWithStrategy(input);
+
     if (!config.apiKey) return simulateResponse(config, input, mode);
 
     const response = await fetch('https://api.anthropic.com/v1/messages', {
@@ -251,9 +289,10 @@ async function AnthropicAdapter(config: ApiConfig, input: StandardInput, mode: a
             model: config.modelId || 'claude-3-5-sonnet-20240620',
             system: input.systemPrompt,
             messages: [
-                { role: 'user', content: `${xmlContext}\n\n${input.userQuery}` }
+                { role: 'user', content: fullContent }
             ],
-            max_tokens: 1024
+            max_tokens: 1024,
+            temperature: input.temperature
         })
     });
 
@@ -281,8 +320,11 @@ async function AnthropicAdapter(config: ApiConfig, input: StandardInput, mode: a
 async function GroqAdapter(config: ApiConfig, input: StandardInput, mode: any): Promise<StandardResponse> {
      if (!config.apiKey) return simulateResponse(config, input, mode);
 
-     const fullContent = `CONTEXT:\n${input.userContext}\n\nQUERY:\n${input.userQuery}`;
+     const fullContent = buildPromptWithStrategy(input);
      
+     // Groq hosts Llama 3
+     const modelId = config.modelId || 'llama3-70b-8192';
+
      const response = await fetch('https://api.groq.com/openai/v1/chat/completions', {
         method: 'POST',
         headers: {
@@ -290,7 +332,7 @@ async function GroqAdapter(config: ApiConfig, input: StandardInput, mode: any): 
             'Authorization': `Bearer ${config.apiKey}`
         },
         body: JSON.stringify({
-            model: config.modelId || 'llama3-70b-8192',
+            model: modelId,
             messages: [
                 { role: 'system', content: input.systemPrompt },
                 { role: 'user', content: fullContent }
@@ -299,7 +341,7 @@ async function GroqAdapter(config: ApiConfig, input: StandardInput, mode: any): 
         })
     });
 
-    if (!response.ok) throw new Error(`Groq Error: ${response.statusText}`);
+    if (!response.ok) throw new Error(`Groq/Meta Error: ${response.statusText}`);
     const data = await response.json();
     
     const text = data.choices[0].message.content;
@@ -313,7 +355,7 @@ async function GroqAdapter(config: ApiConfig, input: StandardInput, mode: any): 
             totalTokens: metrics.total_tokens,
             costEstimate: calculateCost(metrics.prompt_tokens, metrics.completion_tokens, 'GROQ'),
             provider: 'GROQ',
-            model: config.modelId || 'llama3',
+            model: modelId,
             routingMode: mode
         }
     };
@@ -322,7 +364,7 @@ async function GroqAdapter(config: ApiConfig, input: StandardInput, mode: any): 
 async function MistralAdapter(config: ApiConfig, input: StandardInput, mode: any): Promise<StandardResponse> {
     if (!config.apiKey) return simulateResponse(config, input, mode);
 
-    const fullContent = `CONTEXT:\n${input.userContext}\n\nQUERY:\n${input.userQuery}`;
+    const fullContent = buildPromptWithStrategy(input);
 
     const response = await fetch('https://api.mistral.ai/v1/chat/completions', {
         method: 'POST',
@@ -335,7 +377,8 @@ async function MistralAdapter(config: ApiConfig, input: StandardInput, mode: any
             messages: [
                 { role: 'system', content: input.systemPrompt },
                 { role: 'user', content: fullContent }
-            ]
+            ],
+            temperature: input.temperature
         })
     });
 
@@ -359,8 +402,51 @@ async function MistralAdapter(config: ApiConfig, input: StandardInput, mode: any
     };
 }
 
+async function XAIAdapter(config: ApiConfig, input: StandardInput, mode: any): Promise<StandardResponse> {
+    if (!config.apiKey) return simulateResponse(config, input, mode);
+
+    const fullContent = buildPromptWithStrategy(input);
+
+    // xAI (Grok) uses an OpenAI-compatible schema
+    const response = await fetch('https://api.x.ai/v1/chat/completions', {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${config.apiKey}`
+        },
+        body: JSON.stringify({
+            model: config.modelId || 'grok-beta',
+            messages: [
+                { role: 'system', content: input.systemPrompt },
+                { role: 'user', content: fullContent }
+            ],
+            temperature: input.temperature,
+            stream: false
+        })
+    });
+
+    if (!response.ok) throw new Error(`xAI (Grok) Error: ${response.statusText}`);
+    const data = await response.json();
+
+    const text = data.choices[0].message.content;
+    const metrics = data.usage || { prompt_tokens: 0, completion_tokens: 0 };
+
+    return {
+        text,
+        metrics: {
+            inputTokens: metrics.prompt_tokens,
+            outputTokens: metrics.completion_tokens,
+            totalTokens: metrics.total_tokens,
+            costEstimate: calculateCost(metrics.prompt_tokens, metrics.completion_tokens, 'XAI'),
+            provider: 'XAI',
+            model: config.modelId || 'grok-beta',
+            routingMode: mode
+        }
+    };
+}
+
 async function CustomLocalAdapter(config: ApiConfig, input: StandardInput, mode: any): Promise<StandardResponse> {
-     const fullContent = `CONTEXT:\n${input.userContext}\n\nQUERY:\n${input.userQuery}`;
+     const fullContent = buildPromptWithStrategy(input);
      
      if (!config.baseUrl) throw new Error("Missing Local Endpoint");
 
@@ -373,7 +459,8 @@ async function CustomLocalAdapter(config: ApiConfig, input: StandardInput, mode:
                 messages: [
                     { role: 'system', content: input.systemPrompt },
                     { role: 'user', content: fullContent }
-                ]
+                ],
+                temperature: input.temperature
             })
         });
         
@@ -406,8 +493,9 @@ async function CustomLocalAdapter(config: ApiConfig, input: StandardInput, mode:
 function simulateResponse(config: ApiConfig, input: StandardInput, mode: any): Promise<StandardResponse> {
     return new Promise(resolve => {
         setTimeout(() => {
-            const inputT = estimateTokens(input.userContext + input.userQuery);
-            const text = `[SIMULATED ${config.provider} RESPONSE]\n\nI have processed your query: "${input.userQuery}" using the ${config.modelId} architecture.\n\nMode: ${mode}\n\nSince no valid API key was found in this demo environment, I am mocking this response. In a production build, this would hit ${config.provider}'s servers directly.\n\nContext used: ${input.userContext.length > 10 ? 'YES' : 'NONE'}.`;
+            const fullContent = buildPromptWithStrategy(input);
+            const inputT = estimateTokens(fullContent);
+            const text = `[SIMULATED ${config.provider} RESPONSE]\n\nI have processed your query with T=${input.temperature} and Strategy=${input.strategy}.\n\nMode: ${mode}\n\nSince no valid API key was found in this demo environment, I am mocking this response. In a production build, this would hit ${config.provider}'s servers directly.\n\nContext used: ${input.userContext.length > 10 ? 'YES' : 'NONE'}.`;
             const outputT = estimateTokens(text);
             
             resolve({

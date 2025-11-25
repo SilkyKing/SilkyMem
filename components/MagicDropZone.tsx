@@ -118,11 +118,11 @@ const MagicDropZone: React.FC = () => {
         className={`
             relative overflow-hidden rounded-xl border-2 border-dashed transition-all duration-300 p-8 flex flex-col items-center justify-center text-center cursor-pointer group
             ${dragActive 
-                ? 'border-cyan-400 bg-cyan-900/20 scale-[1.02] shadow-[0_0_20px_rgba(6,182,212,0.3)]' 
+                ? 'border-cyan-400 bg-cyan-900/20 scale-[1.02] shadow-[0_0_20px_rgba(36,224,232,0.3)]' 
                 : processingState === 'ERROR'
                     ? 'border-red-500 bg-red-900/10'
                     : 'border-slate-800 bg-slate-900/30 hover:bg-slate-900/50 hover:border-slate-600'}
-            ${processingState === 'PROCESSING' ? 'border-none ring-2 ring-cyan-500/50' : ''}
+            ${processingState === 'PROCESSING' ? 'border-none ring-2 ring-cyan-core/50' : ''}
         `}
         onDragEnter={handleDrag}
         onDragLeave={handleDrag}
@@ -133,7 +133,7 @@ const MagicDropZone: React.FC = () => {
         {processingState === 'IDLE' && (
             <>
                 <div className="w-12 h-12 rounded-full bg-slate-800 flex items-center justify-center mb-4 group-hover:scale-110 transition-transform">
-                    <svg className="w-6 h-6 text-slate-400 group-hover:text-cyan-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <svg className="w-6 h-6 text-slate-400 group-hover:text-cyan-core" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12" />
                     </svg>
                 </div>
@@ -149,8 +149,13 @@ const MagicDropZone: React.FC = () => {
 
         {processingState === 'PROCESSING' && (
              <div className="flex flex-col items-center z-10">
-                <div className="w-10 h-10 border-2 border-slate-800 border-t-cyan-500 rounded-full animate-spin mb-3"></div>
-                <div className="text-xs font-bold text-cyan-400 animate-pulse">PROCESSING: {fileName}</div>
+                {/* REPLACED SPINNER WITH NEXUS CORE ANIMATION */}
+                <div className="relative w-12 h-12 flex items-center justify-center mb-4">
+                    <div className="absolute inset-0 border-2 border-cyan-core/20 transform rotate-45"></div>
+                    <div className="absolute w-full h-full bg-cyan-core rounded-full opacity-75 animate-ping"></div>
+                    <div className="relative w-4 h-4 bg-cyan-core rounded-full shadow-[0_0_12px_#24E0E8]"></div>
+                </div>
+                <div className="text-xs font-bold text-cyan-core animate-pulse">PROCESSING: {fileName}</div>
                 <div className="text-[9px] text-slate-500 mt-1">Generating Embeddings...</div>
              </div>
         )}
@@ -175,21 +180,21 @@ const MagicDropZone: React.FC = () => {
         
         {/* Background Scan Effect */}
         {processingState === 'PROCESSING' && (
-             <div className="absolute inset-0 bg-gradient-to-b from-transparent via-cyan-500/10 to-transparent animate-scan pointer-events-none"></div>
+             <div className="absolute inset-0 bg-gradient-to-b from-transparent via-cyan-core/10 to-transparent animate-scan pointer-events-none"></div>
         )}
       </div>
 
       {/* Upsell Ramp (Modal) */}
       {showUpsell && (
           <div 
-            className="absolute top-0 left-0 right-0 bottom-0 bg-slate-900/95 backdrop-blur rounded-xl border border-cyan-500/30 flex flex-col items-center justify-center p-6 text-center animate-in fade-in slide-in-from-bottom-2 shadow-2xl z-20 cursor-default"
+            className="absolute top-0 left-0 right-0 bottom-0 bg-slate-900/95 backdrop-blur rounded-xl border border-cyan-core/30 flex flex-col items-center justify-center p-6 text-center animate-in fade-in slide-in-from-bottom-2 shadow-2xl z-20 cursor-default"
             onClick={(e) => {
                 // Background Click Dismissal
                 if (e.target === e.currentTarget) closeUpsell();
             }}
           >
               <div onClick={(e) => e.stopPropagation()} className="flex flex-col items-center w-full">
-                  <h4 className="text-sm font-bold text-cyan-400 mb-2">Secure Link Established</h4>
+                  <h4 className="text-sm font-bold text-cyan-core mb-2">Secure Link Established</h4>
                   <p className="text-[10px] text-slate-400 mb-4 max-w-[250px] leading-relaxed">
                       Your file was successfully indexed into the vault. Want to automate this for your digital life?
                   </p>

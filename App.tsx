@@ -12,7 +12,40 @@ import { APP_NAME } from './constants';
 
 type ViewState = 'CHAT' | 'LIBRARY' | 'APIS';
 
+const SplashScreen: React.FC<{ onComplete: () => void }> = ({ onComplete }) => {
+    useEffect(() => {
+        const timer = setTimeout(onComplete, 3000); // 3s Boot Sequence
+        return () => clearTimeout(timer);
+    }, [onComplete]);
+
+    return (
+        <div className="fixed inset-0 z-[9999] bg-black flex flex-col items-center justify-center">
+            <div className="relative w-32 h-32 animate-in fade-in duration-1000">
+                {/* The Nexus Cube Construction */}
+                <div className="absolute inset-0 border-2 border-cyan-core/20 transform rotate-45 scale-75"></div>
+                <div className="absolute inset-0 border-2 border-cyan-core/10 transform rotate-45 scale-90"></div>
+                
+                {/* The Cyan Core */}
+                <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-8 h-8 bg-cyan-core rounded-full shadow-[0_0_40px_rgba(36,224,232,0.6)] animate-pulse-core"></div>
+                
+                {/* Data Lines */}
+                <div className="absolute inset-0 border-t border-b border-cyan-core/30 scale-x-0 animate-[spin_3s_linear_infinite] opacity-30"></div>
+            </div>
+            
+            <div className="mt-8 text-center">
+                <div className="text-[10px] font-mono text-cyan-core/80 tracking-[0.3em] animate-pulse">
+                    MOUNTING SECURE VOLUME...
+                </div>
+                <div className="h-0.5 w-24 bg-cyan-900/50 mx-auto mt-4 rounded-full overflow-hidden">
+                    <div className="h-full bg-cyan-core w-full animate-[translateX_1.5s_ease-in-out_infinite]"></div>
+                </div>
+            </div>
+        </div>
+    );
+};
+
 const App: React.FC = () => {
+  const [isBooting, setIsBooting] = useState(true);
   const [isAuthenticated, setIsAuthenticated] = useState(false);
   
   const [view, setView] = useState<ViewState>('CHAT');
@@ -61,7 +94,7 @@ const App: React.FC = () => {
   };
 
   useEffect(() => {
-    if (isAuthenticated) {
+    if (isAuthenticated && !isBooting) {
         // SAFETY GUARD: Check if vault is actually locked (HMR or state desync)
         if (vault.getIsLocked()) {
              console.warn("Vault is locked but App is Authenticated. Resetting security context.");
@@ -87,7 +120,7 @@ const App: React.FC = () => {
             window.removeEventListener('nexus-navigate', handleNavigate);
         };
     }
-  }, [isAuthenticated]);
+  }, [isAuthenticated, isBooting]);
 
   const handleMemoriesActivated = (ids: string[]) => {
     setActiveMemoryIds(ids);
@@ -120,7 +153,9 @@ const App: React.FC = () => {
       
       const isOverLimit = progress >= 100;
       const isHighUsage = progress > 80;
-      const ringColor = isOverLimit ? 'text-red-500' : isHighUsage ? 'text-orange-500' : 'text-cyan-500';
+      // Use CSS variable color via Tailwind class logic or style override if needed
+      // Updated to use 'text-cyan-core' for the healthy state to match the Cube
+      const ringColor = isOverLimit ? 'text-red-500' : isHighUsage ? 'text-orange-500' : 'text-cyan-core';
 
       return (
           <div 
@@ -154,16 +189,16 @@ const App: React.FC = () => {
                             cy="32"
                         />
                     </svg>
-                    {/* Center Shield */}
+                    {/* Center Shield / Cube Icon */}
                     <div className="absolute inset-0 flex items-center justify-center">
-                        <svg className={`w-5 h-5 ${isOverLimit ? 'text-red-500 animate-pulse' : stats.cloudActive ? 'text-emerald-500' : 'text-slate-600'} drop-shadow-[0_0_8px_rgba(16,185,129,0.5)] group-hover:scale-110 transition-transform`} fill="currentColor" viewBox="0 0 20 20">
+                        <svg className={`w-5 h-5 ${isOverLimit ? 'text-red-500 animate-pulse' : stats.cloudActive ? 'text-emerald-500' : 'text-slate-600'} drop-shadow-[0_0_8px_rgba(36,224,232,0.5)] group-hover:scale-110 transition-transform`} fill="currentColor" viewBox="0 0 20 20">
                            <path fillRule="evenodd" d="M10 1.944A11.954 11.954 0 012.166 5C2.056 5.649 2 6.319 2 7c0 5.225 3.34 9.67 8 11.317C14.66 16.67 18 12.225 18 7c0-.682-.057-1.35-.166-2.001A11.954 11.954 0 0110 1.944zM11 14a1 1 0 11-2 0 1 1 0 012 0zm0-7a1 1 0 10-2 0v3a1 1 0 102 0V7z" clipRule="evenodd" />
                         </svg>
                     </div>
                  </div>
                  
                  <div className="flex flex-col">
-                     <span className={`text-[10px] uppercase font-bold tracking-wider transition-colors ${isOverLimit ? 'text-red-500' : 'text-slate-500 group-hover:text-cyan-400'}`}>
+                     <span className={`text-[10px] uppercase font-bold tracking-wider transition-colors ${isOverLimit ? 'text-red-500' : 'text-slate-500 group-hover:text-cyan-core'}`}>
                          {isOverLimit ? 'STORAGE FULL' : 'Vault Capacity'}
                      </span>
                      <span className="text-sm font-mono text-slate-200">
@@ -181,22 +216,25 @@ const App: React.FC = () => {
       );
   };
 
+  if (isBooting) {
+      return <SplashScreen onComplete={() => setIsBooting(false)} />;
+  }
+
   if (!isAuthenticated) {
       return <LoginScreen onUnlock={() => setIsAuthenticated(true)} />;
   }
 
   return (
-    <div className="flex h-screen w-screen bg-black text-slate-200 overflow-hidden font-sans selection:bg-cyan-500/30">
+    <div className="flex h-screen w-screen bg-black text-slate-200 overflow-hidden font-sans selection:bg-cyan-core/30">
       
-      {/* Left Sidebar: "Liquid Glass" */}
-      <div className="w-72 relative flex flex-col flex-shrink-0 z-20">
-        {/* Glass Background */}
-        <div className="absolute inset-0 bg-slate-950/80 backdrop-blur-xl border-r border-white/5"></div>
+      {/* Left Sidebar: "Deep Matte Black" */}
+      <div className="w-72 relative flex flex-col flex-shrink-0 z-20 bg-brand-black border-r border-white/5">
         
         {/* Content */}
         <div className="relative z-10 flex flex-col h-full">
             <div className="h-16 flex items-center px-6 border-b border-white/5">
-                <div className={`w-3 h-3 rounded-full mr-3 shadow-[0_0_15px_rgba(255,255,255,0.3)] ${vault.getIsDuress() ? 'bg-slate-500' : 'bg-gradient-to-tr from-cyan-400 to-purple-500'}`}></div>
+                {/* Cube Icon for Brand */}
+                <div className={`w-3 h-3 mr-3 shadow-[0_0_10px_rgba(36,224,232,0.5)] ${vault.getIsDuress() ? 'bg-slate-500' : 'bg-cyan-core animate-pulse-core'}`}></div>
                 <h1 className="text-lg font-bold tracking-widest text-slate-100 font-mono">{APP_NAME}</h1>
             </div>
             
@@ -214,7 +252,7 @@ const App: React.FC = () => {
                         onClick={() => setView(item.id as ViewState)}
                         className={`w-full flex items-center gap-3 px-3 py-3 rounded-xl text-sm transition-all duration-200 group active:scale-95 ${
                             view === item.id 
-                            ? 'bg-white/5 text-cyan-400 shadow-[0_0_20px_rgba(0,0,0,0.3)] border border-white/5' 
+                            ? 'bg-white/5 text-cyan-core shadow-[0_0_20px_rgba(0,0,0,0.3)] border border-white/5' 
                             : 'text-slate-400 hover:bg-white/5 hover:text-slate-200 border border-transparent'
                         }`}
                     >
@@ -233,7 +271,7 @@ const App: React.FC = () => {
             <div className="p-4 border-t border-white/5">
                 <button 
                 onClick={() => setShowPersonaConfig(true)}
-                className="w-full p-3 rounded-xl bg-gradient-to-r from-slate-900 to-slate-900 border border-white/5 hover:border-cyan-500/30 transition-all active:scale-95 group text-left relative overflow-hidden"
+                className="w-full p-3 rounded-xl bg-gradient-to-r from-slate-900 to-slate-900 border border-white/5 hover:border-cyan-core/30 transition-all active:scale-95 group text-left relative overflow-hidden"
                 >
                     <div className="flex items-center gap-3 relative z-10">
                         <div className="w-9 h-9 rounded-full bg-slate-800 flex items-center justify-center border border-white/5">
@@ -255,7 +293,7 @@ const App: React.FC = () => {
       </div>
 
       {/* Center Area: Dynamic View */}
-      <div className="flex-1 relative z-0 flex flex-col min-w-0">
+      <div className="flex-1 relative z-0 flex flex-col min-w-0 bg-black">
         <div className="absolute inset-0 bg-gradient-to-b from-transparent to-black/50 pointer-events-none"></div>
         
         {view === 'CHAT' && (
@@ -275,7 +313,7 @@ const App: React.FC = () => {
 
       {/* Right Sidebar: Context Rail */}
       {view === 'CHAT' && (
-        <div className="w-80 relative z-10 border-l border-white/5 backdrop-blur-md bg-slate-950/60 shadow-2xl">
+        <div className="w-80 relative z-10 border-l border-white/5 backdrop-blur-md bg-brand-black/90 shadow-2xl">
             <ContextRail 
                 liveInput={liveInput}
                 lastModelMessage={lastModelMessage}

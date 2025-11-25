@@ -1,4 +1,3 @@
-
 import React, { useState, useRef, useEffect, useCallback } from 'react';
 import { ChatMessage, ApiConfig, PersonaProfile, ApiProviderType, PromptInjectionStrategy } from '../types';
 import { vault } from '../services/vaultService';
@@ -13,6 +12,14 @@ interface ChatInterfaceProps {
   pinnedMemoryIds: string[];
   activePersona: PersonaProfile;
 }
+
+// Reusable Core Loader Component
+const NexusCoreLoader = () => (
+    <div className="relative w-4 h-4 flex items-center justify-center">
+        <div className="absolute w-full h-full bg-cyan-core rounded-full opacity-75 animate-ping"></div>
+        <div className="relative w-2 h-2 bg-cyan-core rounded-full shadow-[0_0_8px_#24E0E8]"></div>
+    </div>
+);
 
 const ChatInterface: React.FC<ChatInterfaceProps> = ({ 
     onMemoriesActivated, 
@@ -222,7 +229,7 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({
           case 'GROQ': return 'border-blue-500 text-blue-500'; 
           case 'MISTRAL': return 'border-yellow-500 text-yellow-500'; 
           case 'XAI': return 'border-slate-100 text-slate-100'; 
-          default: return 'border-cyan-500 text-cyan-500';
+          default: return 'border-cyan-core text-cyan-core';
       }
   };
 
@@ -277,11 +284,11 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({
     >
       {/* Global Drop Zone Overlay */}
       {dragActive && (
-          <div className="absolute inset-0 z-50 bg-black/60 backdrop-blur-md flex flex-col items-center justify-center border-4 border-cyan-500/30 border-dashed animate-in fade-in duration-200 pointer-events-none">
-              <div className="bg-slate-900 p-8 rounded-2xl border border-cyan-500/50 shadow-2xl flex flex-col items-center text-center max-w-sm">
+          <div className="absolute inset-0 z-50 bg-black/60 backdrop-blur-md flex flex-col items-center justify-center border-4 border-cyan-core/30 border-dashed animate-in fade-in duration-200 pointer-events-none">
+              <div className="bg-slate-900 p-8 rounded-2xl border border-cyan-core/50 shadow-2xl flex flex-col items-center text-center max-w-sm">
                   {uploadStatus === 'IDLE' && (
                       <>
-                        <div className="w-16 h-16 rounded-full bg-cyan-900/30 flex items-center justify-center mb-4 text-cyan-400 animate-bounce">
+                        <div className="w-16 h-16 rounded-full bg-cyan-900/30 flex items-center justify-center mb-4 text-cyan-core animate-bounce">
                              <svg className="w-8 h-8" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12" /></svg>
                         </div>
                         <h3 className="text-xl font-bold text-white mb-1">Add to Secure Vault</h3>
@@ -290,10 +297,10 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({
                   )}
                   {uploadStatus === 'PARSING' && (
                       <>
-                         <div className="w-16 h-16 rounded-full border-4 border-cyan-900 border-t-cyan-500 animate-spin mb-4"></div>
-                         <h3 className="text-lg font-bold text-cyan-400 mb-1">Parsing...</h3>
+                         <div className="w-16 h-16 rounded-full border-4 border-cyan-900 border-t-cyan-core animate-spin mb-4"></div>
+                         <h3 className="text-lg font-bold text-cyan-core mb-1">Parsing...</h3>
                          <div className="w-full h-1 bg-slate-800 rounded-full mt-2 overflow-hidden">
-                             <div className="h-full bg-cyan-500 animate-[scan_1s_infinite] w-full origin-left"></div>
+                             <div className="h-full bg-cyan-core animate-[scan_1s_infinite] w-full origin-left"></div>
                          </div>
                       </>
                   )}
@@ -330,21 +337,21 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({
                 onClick={onOpenLibrary}
                 className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-white/5 border border-white/5 hover:bg-white/10 hover:border-white/10 transition-all active:scale-95 group"
             >
-                <svg className="w-4 h-4 text-slate-400 group-hover:text-cyan-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <svg className="w-4 h-4 text-slate-400 group-hover:text-cyan-core" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 20l-5.447-2.724A1 1 0 013 16.382V5.618a1 1 0 011.447-.894L9 7m0 13l6-3m-6 3V7m6 10l4.553 2.276A1 1 0 0021 18.382V7.618a1 1 0 00-.553-.894L15 4m0 13V4m0 0L9 7" />
                 </svg>
-                <span className="text-[10px] font-mono font-bold text-slate-400 group-hover:text-cyan-400 uppercase">Map</span>
+                <span className="text-[10px] font-mono font-bold text-slate-400 group-hover:text-cyan-core uppercase">Map</span>
             </button>
 
             {/* Advanced Toggle */}
             <button 
                 onClick={() => setIsAdvancedMode(!isAdvancedMode)}
-                className={`flex items-center gap-2 px-3 py-1.5 rounded-lg border transition-all active:scale-95 group ${isAdvancedMode ? 'bg-cyan-900/20 border-cyan-500/30' : 'bg-white/5 border-white/5 hover:bg-white/10'}`}
+                className={`flex items-center gap-2 px-3 py-1.5 rounded-lg border transition-all active:scale-95 group ${isAdvancedMode ? 'bg-cyan-900/20 border-cyan-core/30' : 'bg-white/5 border-white/5 hover:bg-white/10'}`}
             >
-                <svg className={`w-4 h-4 ${isAdvancedMode ? 'text-cyan-400' : 'text-slate-400'}`} fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <svg className={`w-4 h-4 ${isAdvancedMode ? 'text-cyan-core' : 'text-slate-400'}`} fill="none" viewBox="0 0 24 24" stroke="currentColor">
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 6V4m0 2a2 2 0 100 4m0-4a2 2 0 110 4m-6 8a2 2 0 100-4m0 4a2 2 0 110-4m0 4v2m0-6V4m6 6v10m6-2a2 2 0 100-4m0 4a2 2 0 110-4m0 4v2m0-6V4" />
                 </svg>
-                <span className={`text-[10px] font-mono font-bold uppercase ${isAdvancedMode ? 'text-cyan-400' : 'text-slate-400'}`}>
+                <span className={`text-[10px] font-mono font-bold uppercase ${isAdvancedMode ? 'text-cyan-core' : 'text-slate-400'}`}>
                     Control
                 </span>
             </button>
@@ -356,7 +363,7 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({
                 <select 
                     value={selectedApiId}
                     onChange={(e) => setSelectedApiId(e.target.value)}
-                    className="bg-black/20 border border-white/10 text-xs text-cyan-400 px-2 py-1 rounded font-mono outline-none focus:border-cyan-500/50 max-w-[150px] appearance-none"
+                    className="bg-black/20 border border-white/10 text-xs text-cyan-core px-2 py-1 rounded font-mono outline-none focus:border-cyan-core/50 max-w-[150px] appearance-none"
                 >
                     <option value="AUTO">Switchboard (Auto)</option>
                     {apiConfigs.map(api => (
@@ -376,10 +383,10 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({
                 <div>
                     <div className="flex justify-between items-center mb-2">
                         <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest flex items-center gap-2">
-                            <svg className="w-3 h-3 text-cyan-500" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 10V3L4 14h7v7l9-11h-7z" /></svg>
+                            <svg className="w-3 h-3 text-cyan-core" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 10V3L4 14h7v7l9-11h-7z" /></svg>
                             Temperature (Creativity)
                         </label>
-                        <span className="text-xs font-mono text-cyan-400 bg-cyan-900/20 px-2 py-0.5 rounded border border-cyan-500/20">{temperature.toFixed(1)}</span>
+                        <span className="text-xs font-mono text-cyan-core bg-cyan-900/20 px-2 py-0.5 rounded border border-cyan-core/20">{temperature.toFixed(1)}</span>
                     </div>
                     <input 
                         type="range" 
@@ -388,7 +395,7 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({
                         step="0.1" 
                         value={temperature} 
                         onChange={(e) => setTemperature(parseFloat(e.target.value))}
-                        className="w-full h-1.5 bg-slate-800 rounded-lg appearance-none cursor-pointer accent-cyan-500 hover:accent-cyan-400"
+                        className="w-full h-1.5 bg-slate-800 rounded-lg appearance-none cursor-pointer accent-cyan-core hover:accent-cyan-400"
                     />
                     <div className="flex justify-between text-[9px] text-slate-600 font-mono mt-1">
                         <span>PRECISE</span>
@@ -407,7 +414,7 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({
                         <select 
                             value={injectionStrategy}
                             onChange={(e) => setInjectionStrategy(e.target.value as PromptInjectionStrategy)}
-                            className="w-full bg-black/40 border border-white/10 rounded-lg py-2 px-3 text-xs text-slate-200 font-mono focus:border-cyan-500/50 outline-none appearance-none"
+                            className="w-full bg-black/40 border border-white/10 rounded-lg py-2 px-3 text-xs text-slate-200 font-mono focus:border-cyan-core/50 outline-none appearance-none"
                         >
                             <option value="PREPEND">PREPEND (Standard)</option>
                             <option value="APPEND">APPEND (Recency Bias)</option>
@@ -476,7 +483,7 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({
                     {msg.relatedMemories && msg.relatedMemories.length > 0 && (
                         <div className="mt-3 flex gap-2 overflow-x-auto pb-1 opacity-50 group-hover:opacity-100 transition-opacity">
                             {msg.relatedMemories.map((id) => (
-                                <span key={id} className="text-[9px] font-mono text-cyan-400 bg-cyan-900/20 px-1.5 py-0.5 rounded border border-cyan-500/20 whitespace-nowrap">
+                                <span key={id} className="text-[9px] font-mono text-cyan-core bg-cyan-900/20 px-1.5 py-0.5 rounded border border-cyan-core/20 whitespace-nowrap">
                                     REF:{id.split('-')[1]}
                                 </span>
                             ))}
@@ -491,11 +498,8 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({
             <div className="flex justify-start animate-fade-in pl-4 border-l-2 border-slate-700">
                 <div className="flex items-center gap-3">
                     <span className="text-xs font-mono text-slate-500 animate-pulse">{currentStep}</span>
-                    <div className="flex space-x-1">
-                        <div className="w-1 h-1 rounded-full bg-slate-500 animate-bounce"></div>
-                        <div className="w-1 h-1 rounded-full bg-slate-500 animate-bounce delay-75"></div>
-                        <div className="w-1 h-1 rounded-full bg-slate-500 animate-bounce delay-150"></div>
-                    </div>
+                    {/* REPLACED: Standard dots with Nexus Core Loader */}
+                    <NexusCoreLoader />
                 </div>
             </div>
         )}
@@ -517,7 +521,7 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({
             {/* Attachment Icon */}
             <div className="absolute left-3 top-3">
                 <button 
-                    className="text-slate-600 hover:text-cyan-400 transition-colors p-1.5 rounded-lg hover:bg-white/5 active:scale-95"
+                    className="text-slate-600 hover:text-cyan-core transition-colors p-1.5 rounded-lg hover:bg-white/5 active:scale-95"
                     title="Attach File"
                     onClick={() => fileInputRef.current?.click()}
                 >
